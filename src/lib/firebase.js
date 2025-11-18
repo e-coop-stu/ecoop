@@ -7,14 +7,13 @@ import { getDatabase } from "firebase/database";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FB_API_KEY,
-  authDomain: import.meta.env.VITE_FB_AUTH_DOMAIN,
-  databaseURL: import.meta.env.VITE_FB_DATABASE_URL || undefined,
-  projectId: import.meta.env.VITE_FB_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FB_STORAGE, // 必須是 *.appspot.com
-  messagingSenderId: import.meta.env.VITE_FB_SENDER_ID,
-  appId: import.meta.env.VITE_FB_APP_ID,
-  measurementId: import.meta.env.VITE_FB_MEASUREMENT_ID || undefined,
+  apiKey: "AIzaSyCA3JFCqMW_CwpdkWRE_kv8XrYKDlQhU08",
+  authDomain: "shop-f387d.firebaseapp.com",
+  projectId: "shop-f387d",
+  storageBucket: "shop-f387d.firebasestorage.app",
+  messagingSenderId: "484766516898",
+  appId: "1:484766516898:web:8a82461a7d4dee6841b9fb",
+  measurementId: "G-S94H7MR8G0"
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
