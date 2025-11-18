@@ -1,0 +1,209 @@
+/* styles.css content placeholder */
+:root {
+  --brand: #0ea567;
+  --brand-dark: #0a7a4c;
+  --bg: #f1f5f9;
+  --card: #fff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-light: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* --- App Shell --- */
+.app-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #0f172a;
+  color: white;
+  padding: 20px;
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 24px;
+}
+
+.nav-link {
+  display: block;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  color: #cbd5e1;
+  text-decoration: none;
+  transition: 0.2s;
+}
+
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.nav-link.active {
+  background: #1e293b;
+  color: white;
+}
+
+.content {
+  padding: 24px;
+}
+
+/* --- Card --- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  height: 200px;          /* 固定高度，避免太長 */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;    /* 水平置中內容 */
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+
+.card:hover {
+  transform: translateY(-3px);
+}
+
+.kpi {
+  font-size: 32px;            /* KPI 數字大一點 */
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+
+.card + .card {
+  margin-top: 16px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-light);
+}
+
+.card-body {
+  font-size: 14px;
+}
+
+/* --- Buttons --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn:hover {
+  background: #f8fafc;
+}
+
+.btn.primary {
+  background: var(--brand);
+  border: none;
+  color: white;
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  background: var(--brand-dark);
+}
+
+/* --- Inputs --- */
+.input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+/* --- Layout --- */
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.grid {
+  display: grid;
+  gap: 20px;
+}
+
+.cols-12 {
+  grid-template-columns: repeat(12, 1fr);
+}
+
+/* --- Table --- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--text-light);
+}
+
+
+/* 卡片結構：直向排列 */
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;                  /* 防止 flex 子元素計算寬度為 0 */
+}
+
+/* 讓內容區撐滿剩餘高度（圖表才能有高度） */
+.card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 統一圖表卡高度 */
+.card.chart-sm { height: 320px; }
+.card.chart-lg { height: 360px; }
+
+/* 圖表的直接容器，提供 100% 寬高給 ResponsiveContainer */
+.chart-fill {
+  flex: 1;
+  width: 100%;
+  min-width: 0;                  /* 在 flex/grid 場景避免寬度被壓到 0 */
+  min-height: 0;                 /* 有些瀏覽器需要這個才能計算高度 */
+}
