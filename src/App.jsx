@@ -122,8 +122,7 @@ export default function App() {
 
         <SectionTitle>GENERAL</SectionTitle>
         <div style={{ display:"grid", gap: 6 }}>
-          <MenuItem to="#/settings" icon="⚙️" label="Settings" active={false} />
-          <MenuItem to="#/help"     icon="❓" label="Help"     active={false} />
+          
           <a onClick={doSignOut} style={{
             cursor:"pointer", display:"flex", alignItems:"center", gap:12,
             padding:"10px 12px", borderRadius:12, color:"#334155"
