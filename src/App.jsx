@@ -9,7 +9,7 @@ import Reports      from "./pages/Reports";
 import Inventory    from "./pages/Inventory";
 import POS          from "./pages/POS";
 import Login        from "./pages/Login";
-import Members from "./pages/Members";
+import Member from "./pages/Member";
 
 
 // Hash routes
@@ -22,7 +22,7 @@ const routes = {
   "#/tx": Transactions,
   "#/inventory": Inventory,
   "#/login": Login,
-  "#/members": Members,
+  "#/member": Member,
 };
 
 const theme = {
