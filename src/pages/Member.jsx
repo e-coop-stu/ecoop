@@ -1,4 +1,4 @@
-// src/pages/Members.jsx
+// src/pages/Member.jsx
 import React, { useEffect, useState } from "react";
 import Topbar from "../components/Topbar";
 import Card from "../components/Card";
@@ -11,23 +11,24 @@ import {
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
-export default function Members() {
+export default function Member() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [amounts, setAmounts] = useState({}); // 每個學生的加值金額
+  const [amounts, setAmounts] = useState({}); // 每個學生輸入的加值金額
 
-  // 讀取全部學生資料
+  // 讀取全部學生資料（從 Firestore 的 students 集合）
   async function fetchMembers() {
     setLoading(true);
     setError("");
     try {
-      const snap = await getDocs(collection(db, "members"));
+      // 🔹 這裡改成 students
+      const snap = await getDocs(collection(db, "students"));
       const list = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
       }));
-      // 依 email 排序（你也可以改成依 createdAt）
+      // 依 email 排序（你可以改成依 createdAt 排）
       list.sort((a, b) => (a.email || "").localeCompare(b.email || ""));
       setMembers(list);
     } catch (err) {
@@ -42,7 +43,7 @@ export default function Members() {
     fetchMembers();
   }, []);
 
-  // 處理輸入金額
+  // 處理單一學生的輸入金額
   function handleAmountChange(memberId, value) {
     setAmounts((prev) => ({
       ...prev,
@@ -53,10 +54,12 @@ export default function Members() {
   // 管理員按「加值」的行為
   async function handleTopup(member) {
     const raw = amounts[member.id];
+
     if (!raw) {
       alert("請先輸入金額");
       return;
     }
+
     const value = Number(raw);
     if (Number.isNaN(value) || value <= 0) {
       alert("請輸入大於 0 的數字");
@@ -69,8 +72,10 @@ export default function Members() {
       setError("");
 
       await runTransaction(db, async (tx) => {
-        const memberRef = doc(db, "members", member.id);
+        // 🔹 這裡也改成 students
+        const memberRef = doc(db, "students", member.id);
         const snap = await tx.get(memberRef);
+
         if (!snap.exists()) {
           throw new Error("找不到該學生帳號");
         }
@@ -78,30 +83,35 @@ export default function Members() {
         const current = snap.data().balance || 0;
         const newBalance = current + value;
 
-        // 1. 更新 members.balance
+        // 1. 更新 students.balance
         tx.update(memberRef, {
           balance: newBalance,
           updatedAt: serverTimestamp(),
         });
 
-        // 2. 新增一筆 topups 紀錄
+        // 2. 新增一筆加值紀錄（topups 集合）
         const topupRef = doc(collection(db, "topups"));
         tx.set(topupRef, {
-          memberId: member.id,
+          // 🔹 欄位名稱順便改成 studentId，之後比較清楚
+          studentId: member.id,
           email: member.email || "",
           amount: value,
           createdAt: serverTimestamp(),
-          by: "admin", // 之後你可以換成登入的管理員帳號
+          by: "admin", // 之後可以放現在登入的管理員 email
+          type: "topup",
         });
       });
 
       alert("加值成功！");
+      // 清空這個學生的輸入框
       setAmounts((prev) => ({ ...prev, [member.id]: "" }));
-      fetchMembers(); // 重新讀取最新餘額
+      // 重新載入最新餘額
+      fetchMembers();
     } catch (err) {
       console.error(err);
-      setError("加值失敗：" + err.message);
-      alert("加值失敗：" + err.message);
+      const msg = "加值失敗：" + err.message;
+      setError(msg);
+      alert(msg);
     }
   }
 
