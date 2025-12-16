@@ -3,13 +3,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
-import Dashboard    from "./pages/Dashboard";
-import Transactions from "./pages/Transactions";
-import Reports      from "./pages/Reports";
-import Inventory    from "./pages/Inventory";
-import POS          from "./pages/POS";
-import Login        from "./pages/Login";
-import Member       from "./pages/Member";   // 會員 / 加值頁
+import Dashboard     from "./pages/Dashboard";
+import Transactions  from "./pages/Transactions";
+import Reports       from "./pages/Reports";
+import Inventory     from "./pages/Inventory";
+import POS           from "./pages/POS";
+import Login         from "./pages/Login";
+import Member        from "./pages/Member";
+import Notifications from "./pages/Notifications"; // 🔔 新增
 
 // Hash routes
 const routes = {
@@ -20,8 +21,9 @@ const routes = {
   "#/reports": Reports,
   "#/tx": Transactions,
   "#/inventory": Inventory,
+  "#/member": Member,
+  "#/notifications": Notifications, // 🔔 新增
   "#/login": Login,
-  "#/member": Member,   // 新增路由
 };
 
 const theme = {
@@ -101,16 +103,13 @@ export default function App() {
   const isLoginRoute = hash === "#/login";
   const Page = useMemo(() => routes[hash] || Dashboard, [hash]);
 
-  // 載入中先不畫
   if (user === undefined) return null;
 
-  // 未登入：只顯示登入頁（不出現側邊欄）
   if (!user) {
     if (!isLoginRoute) window.location.hash = "#/login";
     return <Login />;
   }
 
-  // 已登入仍在 /login → 導回首頁
   if (isLoginRoute) window.location.hash = "#/";
 
   const isActive = (h) =>
@@ -197,20 +196,23 @@ export default function App() {
             label="Transactions"
             active={isActive("#/tx")}
           />
-
-          {/* 新增：會員 / 加值 */}
           <MenuItem
             to="#/member"
             icon="💳"
             label="Members / Deposit"
             active={isActive("#/member")}
           />
-
           <MenuItem
             to="#/inventory"
             icon="📦"
             label="Inventory"
             active={isActive("#/inventory")}
+          />
+          <MenuItem
+            to="#/notifications"
+            icon="🔔"
+            label="Notifications"
+            active={isActive("#/notifications")}
           />
         </div>
 
@@ -258,7 +260,6 @@ export default function App() {
             marginBottom: 14,
           }}
         >
-          {/* Search */}
           <div
             style={{
               flex: 1,
@@ -313,7 +314,6 @@ export default function App() {
             Import Data
           </a>
 
-          {/* Avatar + email（點擊可登出） */}
           <div
             title={user.email}
             onClick={doSignOut}
