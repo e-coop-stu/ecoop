@@ -38,10 +38,6 @@ function getLevel(expiryAt, alertDays = 7) {
 function toTs(dateStr) {
   return Timestamp.fromDate(new Date(dateStr + "T00:00:00"));
 }
-function fmtDate(ts) {
-  const d = ts?.toDate ? ts.toDate() : null;
-  return d ? d.toLocaleDateString() : "-";
-}
 
 export default function Inventory() {
   const [busy, setBusy] = useState(false);
@@ -51,17 +47,35 @@ export default function Inventory() {
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
 
-  const [products, setProducts] = useState([]);
+  // 商品清單
+  const [products, setProducts] = useState([]); // [{id, name, sku, barcode, price, stock, expiryAlertDays}]
   const [productId, setProductId] = useState("");
 
+  const currentProduct = useMemo(
+    () => products.find((p) => p.id === productId) || null,
+    [products, productId]
+  );
+
+  // ✅ 商品編輯表單（把你原本商品編輯加回來）
+  const [pForm, setPForm] = useState({
+    name: "",
+    sku: "",
+    barcode: "",
+    price: 0,
+    stock: 0,
+  });
+
+  // 到期提醒天數（寫回 products.expiryAlertDays）
   const [alertDays, setAlertDays] = useState(7);
 
+  // 新增批次輸入
   const [qty, setQty] = useState(1);
   const [expiryDate, setExpiryDate] = useState(
     toLocalISODate(new Date(Date.now() + 14 * 86400000))
   );
 
-  const [batches, setBatches] = useState([]);
+  // 批次資料
+  const [batches, setBatches] = useState([]); // [{id, qty, expiryAt, receivedAt}]
 
   async function loadProducts() {
     const snap = await getDocs(
@@ -72,7 +86,10 @@ export default function Inventory() {
       ...d.data(),
     }));
     setProducts(list);
-    if (!productId && list.length > 0) setProductId(list[0].id);
+
+    if (!productId && list.length > 0) {
+      setProductId(list[0].id);
+    }
   }
 
   async function ensureInventoryDoc(pid) {
@@ -101,6 +118,44 @@ export default function Inventory() {
     }
     const data = pSnap.data();
     setAlertDays(Number(data.expiryAlertDays || 7));
+  }
+
+  // ✅ 當選擇商品改變，把商品資料同步到編輯表單
+  useEffect(() => {
+    if (!currentProduct) return;
+    setPForm({
+      name: currentProduct.name || "",
+      sku: currentProduct.sku || "",
+      barcode: currentProduct.barcode || "",
+      price: Number(currentProduct.price || 0),
+      stock: Number(currentProduct.stock || 0),
+    });
+  }, [currentProduct]);
+
+  // ✅ 儲存商品編輯
+  async function saveProductEdit() {
+    setMsg("");
+    if (!productId) return;
+
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, "products", productId), {
+        name: String(pForm.name || "").trim(),
+        sku: String(pForm.sku || "").trim(),
+        barcode: String(pForm.barcode || "").trim(),
+        price: Number(pForm.price || 0),
+        stock: Number(pForm.stock || 0),
+        updatedAt: serverTimestamp(),
+      });
+
+      setMsg("✅ 商品資料已更新");
+      await loadProducts();
+    } catch (e) {
+      console.error(e);
+      alert("❌ 儲存失敗：" + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveAlertDays() {
@@ -147,7 +202,6 @@ export default function Inventory() {
     setScanBusy(true);
 
     try {
-      // 確保 products 是最新的（避免沒載到）
       let plist = products;
       if (!plist || plist.length === 0) {
         const snap = await getDocs(
@@ -166,19 +220,19 @@ export default function Inventory() {
         const pname = p.name || pid;
         const pAlert = Number(p.expiryAlertDays || 7);
 
-        // 抓每個商品的 batches
         const bSnap = await getDocs(
-          query(collection(db, "inventory", pid, "batches"), orderBy("expiryAt", "asc"))
+          query(
+            collection(db, "inventory", pid, "batches"),
+            orderBy("expiryAt", "asc")
+          )
         );
 
         for (const b of bSnap.docs) {
           const batchId = b.id;
           const data = b.data();
-
           const q = Number(data.qty || 0);
           const exp = data.expiryAt?.toDate ? data.expiryAt.toDate() : null;
 
-          // 沒到期日 or 數量為 0 -> 不通知
           if (!exp || q <= 0) {
             skipped++;
             continue;
@@ -190,17 +244,14 @@ export default function Inventory() {
             continue;
           }
 
-          // 通知 doc id 固定，避免重複
           const nid = `expiry_${pid}_${batchId}`;
           const nRef = doc(db, "notifications", nid);
 
           const exist = await getDoc(nRef);
           if (exist.exists()) {
             const old = exist.data();
-            // 保留 read 狀態
             const keepRead = Boolean(old.read);
 
-            // 若 level 或 expiryAt 改變才更新（例如 near -> expired）
             const oldLevel = old.level;
             const oldExp = old.expiryAt?.toDate ? old.expiryAt.toDate() : null;
             const expChanged = oldExp ? oldExp.getTime() !== exp.getTime() : true;
@@ -218,7 +269,6 @@ export default function Inventory() {
                   expiryAt: data.expiryAt,
                   leftDays: info.left,
                   updatedAt: serverTimestamp(),
-                  // 保留 read（不要更新成未讀）
                   read: keepRead,
                 },
                 { merge: true }
@@ -254,11 +304,13 @@ export default function Inventory() {
     }
   }
 
+  // 初始化：載商品
   useEffect(() => {
     loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 選到商品：載提醒天數 + 批次
   useEffect(() => {
     if (!productId) return;
     loadProductAlertDays(productId);
@@ -266,6 +318,7 @@ export default function Inventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
+  // 統計
   const stats = useMemo(() => {
     let totalQty = 0;
     let nearQty = 0;
@@ -287,17 +340,24 @@ export default function Inventory() {
     <>
       <Topbar title="庫存 / 批次管理" />
 
-      {/* 🔔 通知掃描（B） */}
-      <Card title="到期通知（產生通知中心資料）" className="span-12 card" style={{ marginBottom: 12 }}>
+      {/* 🔔 到期通知掃描（B） */}
+      <Card
+        title="到期通知（產生通知中心資料）"
+        className="span-12 card"
+        style={{ marginBottom: 12 }}
+      >
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={scanAndCreateNotifications} disabled={scanBusy}>
             {scanBusy ? "掃描中…" : "🔔 掃描並產生通知"}
           </button>
+
           <a href="#/notifications" style={{ textDecoration: "none", fontWeight: 700 }}>
             前往通知中心 →
           </a>
+
           <div style={{ color: "#0ea567" }}>{scanMsg}</div>
         </div>
+
         <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>
           規則：只針對「有到期日」且「qty &gt; 0」的批次；
           距離到期 ≤ 商品的 expiryAlertDays → 🟡快過期；
@@ -335,7 +395,76 @@ export default function Inventory() {
         </div>
       </Card>
 
-      {/* 提醒規則 */}
+      {/* ✅ 商品資料編輯（加回來） */}
+      <Card title="商品資料編輯" className="span-12 card" style={{ marginBottom: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 12,
+          }}
+        >
+          <label>
+            商品名稱：
+            <input
+              value={pForm.name}
+              onChange={(e) => setPForm((s) => ({ ...s, name: e.target.value }))}
+              style={{ width: "100%" }}
+            />
+          </label>
+
+          <label>
+            價格：
+            <input
+              type="number"
+              value={pForm.price}
+              onChange={(e) => setPForm((s) => ({ ...s, price: e.target.value }))}
+              style={{ width: "100%" }}
+            />
+          </label>
+
+          <label>
+            SKU：
+            <input
+              value={pForm.sku}
+              onChange={(e) => setPForm((s) => ({ ...s, sku: e.target.value }))}
+              style={{ width: "100%" }}
+            />
+          </label>
+
+          <label>
+            條碼 barcode：
+            <input
+              value={pForm.barcode}
+              onChange={(e) => setPForm((s) => ({ ...s, barcode: e.target.value }))}
+              style={{ width: "100%" }}
+            />
+          </label>
+
+          <label>
+            備用庫存 stock（POS 會用）：
+            <input
+              type="number"
+              value={pForm.stock}
+              onChange={(e) => setPForm((s) => ({ ...s, stock: e.target.value }))}
+              style={{ width: "100%" }}
+            />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+          <button onClick={saveProductEdit} disabled={busy || !productId}>
+            {busy ? "儲存中…" : "儲存商品資料"}
+          </button>
+          <div style={{ color: "#0ea567" }}>{msg}</div>
+        </div>
+
+        <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>
+          提醒：你現在同時有「批次庫存」與「stock」。如果要讓 POS 完全改成批次扣庫存（FIFO），POS 的庫存檢查也要一起改。
+        </div>
+      </Card>
+
+      {/* 到期提醒設定 */}
       <Card title="到期提醒設定" className="span-12 card" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
           <label>
@@ -352,8 +481,6 @@ export default function Inventory() {
           <button onClick={saveAlertDays} disabled={busy || !productId}>
             {busy ? "儲存中…" : "儲存設定"}
           </button>
-
-          <div style={{ color: "#0ea567" }}>{msg}</div>
         </div>
 
         <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>
@@ -388,10 +515,6 @@ export default function Inventory() {
           <button onClick={addBatch} disabled={busy || !productId}>
             {busy ? "新增中…" : "新增批次"}
           </button>
-
-          <div style={{ fontSize: 13, color: "#64748b" }}>
-            會寫入：inventory/{productId}/batches
-          </div>
         </div>
       </Card>
 
@@ -416,16 +539,11 @@ export default function Inventory() {
                 <th align="left" style={{ padding: "8px 4px", borderBottom: "1px solid #e5e7eb" }}>
                   剩餘天數
                 </th>
-                <th align="left" style={{ padding: "8px 4px", borderBottom: "1px solid #e5e7eb" }}>
-                  進貨時間
-                </th>
               </tr>
             </thead>
             <tbody>
               {batches.map((b) => {
                 const exp = b.expiryAt?.toDate ? b.expiryAt.toDate() : null;
-                const rec = b.receivedAt?.toDate ? b.receivedAt.toDate() : null;
-
                 const info = exp
                   ? getLevel(exp, Number(alertDays || 7))
                   : { text: "⚪ 未設定", left: "-", level: "unknown" };
@@ -435,10 +553,7 @@ export default function Inventory() {
                     <td style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
                       {b.id.slice(0, 8)}…
                     </td>
-                    <td
-                      align="right"
-                      style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}
-                    >
+                    <td align="right" style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
                       {Number(b.qty || 0)}
                     </td>
                     <td style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
@@ -450,16 +565,13 @@ export default function Inventory() {
                     <td style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
                       {typeof info.left === "number" ? `${info.left} 天` : info.left}
                     </td>
-                    <td style={{ padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
-                      {rec ? rec.toLocaleString() : fmtDate(b.receivedAt)}
-                    </td>
                   </tr>
                 );
               })}
 
               {batches.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: "12px 4px", opacity: 0.6 }}>
+                  <td colSpan={5} style={{ padding: "12px 4px", opacity: 0.6 }}>
                     尚無批次資料。你可以先新增一筆批次（數量＋到期日）。
                   </td>
                 </tr>
