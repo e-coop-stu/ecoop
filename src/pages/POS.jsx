@@ -2,7 +2,6 @@
 import React, { useMemo, useState } from "react";
 import Topbar from "../components/Topbar";
 import Card from "../components/Card";
-import BarcodeScanner from "../components/BarcodeScanner";
 import { db } from "../lib/firebase";
 
 import {
@@ -317,10 +316,7 @@ export default function POS() {
             <button onClick={() => addByCode()} disabled={busy || isShowingOrder}>加入</button>
           </div>
 
-          <BarcodeScanner
-            onScan={(text) => addByCode(text)}
-            style={{ padding: 12, background: "#eef2f7", borderRadius: 8, opacity: isShowingOrder ? 0.5 : 1 }}
-          />
+          
 
           {msg && <div style={{ marginTop: 8, color: "#0ea567" }}>{msg}</div>}
 
