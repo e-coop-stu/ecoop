@@ -1,19 +1,21 @@
-/* styles.css content placeholder */
+/* =========================
+   Global Variables
+========================= */
 :root {
   --brand: #0ea567;
   --brand-dark: #0a7a4c;
   --bg: #f1f5f9;
-  --card: #fff;
+  --card: #ffffff;
   --border: #e2e8f0;
   --text: #0f172a;
   --text-light: #64748b;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* =========================
+   Reset & Base
+========================= */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
 
 body {
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -22,7 +24,9 @@ body {
   line-height: 1.5;
 }
 
-/* --- App Shell --- */
+/* =========================
+   App Shell
+========================= */
 .app-shell {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -51,66 +55,93 @@ body {
   transition: 0.2s;
 }
 
-.nav-link:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+.nav-link:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.nav-link.active { background: #1e293b; color: #fff; }
+
+.content { padding: 24px; }
+
+/* =========================
+   Grid Helpers
+========================= */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
 }
 
-.nav-link.active {
-  background: #1e293b;
-  color: white;
-}
+.span-4  { grid-column: span 4 / span 4; }
+.span-6  { grid-column: span 6 / span 6; }
+.span-8  { grid-column: span 8 / span 8; }
+.span-12 { grid-column: span 12 / span 12; }
 
-.content {
-  padding: 24px;
-}
-
-/* --- Card --- */
+/* =========================
+   Card (✅關鍵：讓圖表有高度)
+========================= */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 20px;
-  height: 200px;          /* 固定高度，避免太長 */
+  padding: 16px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+
+  /* ✅不要置中，避免內容被壓縮 */
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;    /* 水平置中內容 */
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  align-items: stretch;
+  justify-content: flex-start;
+
+  min-width: 0;
+  height: auto;
 }
 
-
-.card:hover {
-  transform: translateY(-3px);
-}
-
-.kpi {
-  font-size: 32px;            /* KPI 數字大一點 */
-  font-weight: 700;
-  margin-top: 10px;
-}
-
-
-.card + .card {
-  margin-top: 16px;
-}
-
+/* header / body */
 .card-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   font-weight: 600;
   font-size: 14px;
   color: var(--text-light);
 }
 
 .card-body {
+  /* ✅關鍵：讓 body 撐開 */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+  min-height: 0; /* ✅recharts 在 flex 裡需要這個 */
   font-size: 14px;
 }
 
-/* --- Buttons --- */
-.btn {
+/* KPI */
+.kpi {
+  font-size: clamp(22px, 4.5vw, 44px);
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ✅給「圖表卡」一個最小高度，避免被壓扁 */
+.card.chart-sm { min-height: 300px; }
+.card.chart-lg { min-height: 360px; }
+
+/* ✅圖表容器：一定要有高度 */
+.chart-fill {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 220px; /* ✅這行是你現在缺的，沒有就會變 0 高 */
+}
+
+/* =========================
+   Buttons / Inputs
+========================= */
+button, .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -121,89 +152,61 @@ body {
   cursor: pointer;
   font-size: 14px;
   transition: background 0.2s;
+  white-space: nowrap;
 }
 
-.btn:hover {
-  background: #f8fafc;
-}
+button:hover, .btn:hover { background: #f8fafc; }
 
 .btn.primary {
   background: var(--brand);
   border: none;
-  color: white;
+  color: #fff;
   font-weight: 600;
 }
+.btn.primary:hover { background: var(--brand-dark); }
 
-.btn.primary:hover {
-  background: var(--brand-dark);
-}
-
-/* --- Inputs --- */
-.input {
+input, .input {
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
   font-size: 14px;
+  max-width: 100%;
 }
 
-/* --- Layout --- */
-.row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.grid {
-  display: grid;
-  gap: 20px;
-}
-
-.cols-12 {
-  grid-template-columns: repeat(12, 1fr);
-}
-
-/* --- Table --- */
-.table {
+/* =========================
+   Tables (✅不要全域 min-width)
+========================= */
+table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
 
-.table th,
-.table td {
+th, td {
   border-bottom: 1px solid var(--border);
   padding: 8px;
   text-align: left;
 }
 
-.table th {
-  font-weight: 600;
-  color: var(--text-light);
-}
+th { font-weight: 600; color: var(--text-light); }
 
+/* =========================
+   Scrollbars (optional)
+========================= */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-/* 卡片結構：直向排列 */
-.card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;                  /* 防止 flex 子元素計算寬度為 0 */
-}
+/* =========================
+   ✅POS 專用（只影響 POS 頁）
+   你需要在 POS 最外層加 className="pos-page"
+========================= */
+.pos-page table { min-width: 520px; }
 
-/* 讓內容區撐滿剩餘高度（圖表才能有高度） */
-.card-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 統一圖表卡高度 */
-.card.chart-sm { height: 320px; }
-.card.chart-lg { height: 360px; }
-
-/* 圖表的直接容器，提供 100% 寬高給 ResponsiveContainer */
-.chart-fill {
-  flex: 1;
-  width: 100%;
-  min-width: 0;                  /* 在 flex/grid 場景避免寬度被壓到 0 */
-  min-height: 0;                 /* 有些瀏覽器需要這個才能計算高度 */
+/* RWD */
+@media (max-width: 960px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .span-6, .span-4, .span-8, .span-12 { grid-column: 1 / -1 !important; }
+  .pos-page table { min-width: 0; }
 }

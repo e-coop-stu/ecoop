@@ -47,11 +47,9 @@ function diffDays(fromStr, toStr) {
 }
 
 function toDateMaybeTs(v) {
-  // Firestore Timestamp
+  if (!v) return null;
   if (v?.toDate) return v.toDate();
-  // {seconds, nanoseconds}
   if (v?.seconds) return new Date(v.seconds * 1000);
-  // string/date
   const d = new Date(v);
   return Number.isFinite(d.getTime()) ? d : null;
 }
@@ -67,10 +65,8 @@ export default function Reports() {
   const [busy, setBusy] = useState(false);
 
   const [kpi, setKpi] = useState({ revenue: 0, count: 0, avg: 0 });
-  const [byDay, setByDay] = useState([]);       // [{d:'12/11', total:0}]
+  const [byDay, setByDay] = useState([]); // [{d:'12/11', total:0}]
   const [byMethod, setByMethod] = useState([]); // [{name:'Face Pay', value: 3}]
-
-  // Top5 + 進貨建議（用 transactions/items 或 checkout_requests/items）
   const [top5, setTop5] = useState([]);
   const [restock, setRestock] = useState([]);
 
@@ -108,7 +104,7 @@ export default function Reports() {
     return result;
   }
 
-  // ✅ 讀 transactions（你原本就有）
+  // ✅ 讀 transactions（ts 範圍）
   async function fetchTransactions(fromTs, toTs) {
     const q1 = query(
       collection(db, "transactions"),
@@ -118,114 +114,100 @@ export default function Reports() {
       limit(5000)
     );
     const snap = await getDocs(q1);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data(), source: "transactions" }));
   }
 
-  // ✅ 讀 checkout_requests：只抓樹莓派完成的 verified（你的需求）
+  // ✅ 讀 checkout_requests：status=verified（先用 createdAt 範圍；不行就 fallback）
   async function fetchCheckoutRequestsVerified(fromTs, toTs) {
-    // 注意：createdAt 用 serverTimestamp() 寫入時，才能用範圍查詢
-    const q1 = query(
-      collection(db, "checkout_requests"),
-      where("status", "==", "verified"),
-      where("createdAt", ">=", fromTs),
-      where("createdAt", "<=", toTs),
-      orderBy("createdAt", "asc"),
-      limit(5000)
-    );
-    const snap = await getDocs(q1);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    try {
+      const q1 = query(
+        collection(db, "checkout_requests"),
+        where("status", "==", "verified"),
+        where("createdAt", ">=", fromTs),
+        where("createdAt", "<=", toTs),
+        orderBy("createdAt", "asc"),
+        limit(5000)
+      );
+      const snap = await getDocs(q1);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data(), source: "checkout_requests" }));
+    } catch (e) {
+      const q2 = query(
+        collection(db, "checkout_requests"),
+        where("status", "==", "verified"),
+        limit(5000)
+      );
+      const snap = await getDocs(q2);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data(), source: "checkout_requests" }));
+    }
   }
 
   const load = async () => {
     setBusy(true);
     try {
-      const fromTs = Timestamp.fromDate(startOfDay(new Date(from)));
-      const toTs = Timestamp.fromDate(endOfDay(new Date(to)));
+      const fromDate = startOfDay(new Date(from));
+      const toDate = endOfDay(new Date(to));
+      const fromTs = Timestamp.fromDate(fromDate);
+      const toTs = Timestamp.fromDate(toDate);
 
-      // 同時抓兩個來源（避免你現在有些交易在 checkout_requests，還沒寫到 transactions）
       const [txs, reqs] = await Promise.all([
         fetchTransactions(fromTs, toTs),
         fetchCheckoutRequestsVerified(fromTs, toTs),
       ]);
 
-      // ===== 統計容器 =====
       let revenue = 0;
       let count = 0;
-      const dayMap = new Map();     // key: "12/11" -> money
-      const methodMap = new Map();  // key: "Face Pay" -> count
-      const productMap = {};        // pid -> {productId,name,qty,revenue}
+      const dayMap = new Map();
+      const methodMap = new Map();
+      const productMap = {};
 
-      // ===== 合併成同一種資料結構計算 =====
-      const all = [];
+      // 合併 + 去重
+      const keyMap = new Map();
+      for (const t of txs) keyMap.set(`tx:${t.id}`, t);
+      for (const r of reqs) keyMap.set(`cr:${r.id}`, r);
 
-      // transactions
-      for (const t of txs) {
-        const ts = toDateMaybeTs(t.ts);
-        if (!ts) continue;
-        all.push({
-          ts,
-          total: Number(t.total || 0),
-          method: t.method || t.payMethod || t.authMethod || "其他",
-          items: Array.isArray(t.items) ? t.items : [],
-          source: "transactions",
-        });
-      }
+      const all = Array.from(keyMap.values())
+        .map((row) => {
+          const ts =
+            toDateMaybeTs(row.ts) ||
+            toDateMaybeTs(row.verifiedAt) ||
+            toDateMaybeTs(row.createdAt) ||
+            null;
+          return { ...row, _ts: ts };
+        })
+        .filter((row) => row._ts && row._ts >= fromDate && row._ts <= toDate)
+        .sort((a, b) => a._ts - b._ts);
 
-      // checkout_requests (verified)
-      for (const r of reqs) {
-        const ts = toDateMaybeTs(r.createdAt) || toDateMaybeTs(r.verifiedAt) || null;
-        if (!ts) continue;
-        all.push({
-          ts,
-          total: Number(r.total || 0),
-          method: r.method || "其他",
-          items: Array.isArray(r.items) ? r.items : [],
-          source: "checkout_requests",
-        });
-      }
-
-      // 依時間排序（漂亮一點）
-      all.sort((a, b) => a.ts - b.ts);
-
-      // ===== 主要累加 =====
       for (const row of all) {
-        const total = Number(row.total) || 0;
-        const method = row.method || "其他";
+        const total = Number(row.total || 0) || 0;
+        const method = row.method || row.payMethod || row.authMethod || "其他";
 
         revenue += total;
         count += 1;
 
-        const dayKey = fmtMD(row.ts);
+        const dayKey = fmtMD(row._ts);
         dayMap.set(dayKey, (dayMap.get(dayKey) || 0) + total);
         methodMap.set(method, (methodMap.get(method) || 0) + 1);
 
-        for (const it of row.items || []) {
-          // 你 checkout_requests 裡有 sku / productId 都可能
-          const pid = it.productId || it.productID || it.pid || null;
+        const items = Array.isArray(row.items) ? row.items : [];
+        for (const it of items) {
+          const pid = it.productId || it.productID || it.pid || it.sku || null;
           const name = it.name || it.title || "未命名商品";
-          const qty = Number(it.qty || 0);
-          const price = Number(it.price || 0);
+          const qty = Number(it.qty ?? it.quantity ?? 0);
+          const price = Number(it.price ?? 0);
 
           if (!pid) continue;
 
           if (!productMap[pid]) {
-            productMap[pid] = {
-              productId: pid,
-              name,
-              qty: 0,
-              revenue: 0,
-            };
+            productMap[pid] = { productId: pid, name, qty: 0, revenue: 0 };
           }
           productMap[pid].qty += qty;
           productMap[pid].revenue += qty * price;
         }
       }
 
-      // ✅ 補 0：把 from~to 每一天都塞進去（柱狀才會完整）
+      // 補 0：from~to 每一天都有
       const days = [];
-      const fromD = startOfDay(new Date(from));
-      const toD = endOfDay(new Date(to));
-      for (let d = new Date(fromD); d <= toD; d = new Date(d.getTime() + 86400000)) {
+      for (let d = new Date(fromDate); d <= toDate; d = new Date(d.getTime() + 86400000)) {
         const key = fmtMD(d);
         days.push({ d: key, total: dayMap.get(key) || 0 });
       }
@@ -235,7 +217,6 @@ export default function Reports() {
         count,
         avg: count ? Math.round((revenue / count) * 100) / 100 : 0,
       });
-
       setByDay(days);
       setByMethod(Array.from(methodMap, ([name, value]) => ({ name, value })));
 
@@ -249,10 +230,10 @@ export default function Reports() {
       alert(e?.message || String(e));
     } finally {
       setBusy(false);
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 0);
     }
   };
 
-  // ✅ 進頁先跑一次（預設 7 天）
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,13 +266,38 @@ export default function Reports() {
     URL.revokeObjectURL(url);
   };
 
-  // ✅ 讓圖表「矮一點、塞進 card」：你想要接近 svg 220x160 的比例
-  // 這裡統一用高度 160（更矮），寬度交給 ResponsiveContainer 100%
-  const CHART_H = 160;
+  const CHART_H = 220;
 
   return (
     <>
-      <Topbar title="報表" />
+      {/* ✅ 這段就是修你截圖那個「卡片被擠爆」的關鍵 */}
+      <style>{`
+        .dashboard-grid{
+          display:grid;
+          grid-template-columns:repeat(12,minmax(0,1fr));
+          gap:12px;
+          align-items:stretch;
+        }
+        .card,.card-body{min-width:0;width:100%}
+        .card-body{display:flex;flex-direction:column}
+        .chartBox{width:100%;min-width:0;overflow:hidden}
+
+        /* KPI 自動縮放，避免 $4,00 被切掉 */
+        .kpi{
+          font-size: clamp(22px, 4.5vw, 44px);
+          font-weight: 800;
+          letter-spacing: .5px;
+          white-space: nowrap;
+          font-variant-numeric: tabular-nums;
+        }
+
+        /* 小螢幕：全部一排一張，不再擠成細條 */
+        @media (max-width: 900px){
+          .span-4,.span-8,.span-12{ grid-column: span 12 / span 12 !important; }
+        }
+      `}</style>
+
+      <Topbar title="Analytics / 報表" />
 
       {/* 期間 */}
       <Card title="期間" className="span-12" style={{ marginBottom: 12 }}>
@@ -322,7 +328,7 @@ export default function Reports() {
       </Card>
 
       {/* KPI */}
-      <div className="dashboard-grid cols-12" style={{ marginBottom: 12, gap: 12 }}>
+      <div className="dashboard-grid cols-12" style={{ marginBottom: 12 }}>
         <Card title="總營收" className="span-4 card">
           <div className="kpi">{money(kpi.revenue)}</div>
         </Card>
@@ -334,40 +340,32 @@ export default function Reports() {
         </Card>
       </div>
 
-      {/* 圖表：左柱狀(日營收) + 右圓餅(付款方式) */}
-      <div className="dashboard-grid cols-12" style={{ gap: 12, marginBottom: 12 }}>
-        {/* ✅ 日營收：柱狀（補0後很好看） */}
+      {/* 圖表 */}
+      <div className="dashboard-grid cols-12" style={{ marginBottom: 12 }}>
         <Card title="日營收趨勢" className="span-8 card">
-          <div style={{ width: "100%", height: CHART_H, minWidth: 0, overflow: "hidden" }}>
+          <div className="chartBox" style={{ height: CHART_H }}>
             {byDay.length === 0 ? (
               <div style={{ padding: 12, color: "#64748b" }}>此期間尚無資料</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={byDay}
-                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                  margin={{ top: 8, right: 12, left: 12, bottom: 0 }}   // ✅ left 留空避免軸被吃掉
                   barCategoryGap="30%"
                 >
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
                   <XAxis dataKey="d" tickMargin={6} />
-                  <YAxis width={40} />
+                  <YAxis width={48} />
                   <Tooltip formatter={(v) => money(v)} />
-                  <Bar
-                    dataKey="total"
-                    fill="#0ea567"
-                    radius={[8, 8, 0, 0]}
-                    // ✅ 讓柱子不要變超細
-                    maxBarSize={48}
-                  />
+                  <Bar dataKey="total" fill="#0ea567" radius={[8, 8, 0, 0]} maxBarSize={48} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </div>
         </Card>
 
-        {/* ✅ 付款方式占比：圓餅 */}
         <Card title="付款方式占比" className="span-4 card">
-          <div style={{ width: "100%", height: CHART_H, minWidth: 0, overflow: "hidden" }}>
+          <div className="chartBox" style={{ height: CHART_H }}>
             {byMethod.length === 0 ? (
               <div style={{ padding: 12, color: "#64748b" }}>此期間尚無資料</div>
             ) : (
@@ -377,8 +375,8 @@ export default function Reports() {
                     data={byMethod}
                     dataKey="value"
                     nameKey="name"
-                    innerRadius={42}
-                    outerRadius={64}
+                    innerRadius={50}
+                    outerRadius={78}
                     paddingAngle={2}
                   >
                     {byMethod.map((_, idx) => (
@@ -404,10 +402,10 @@ export default function Reports() {
             alignItems: "start",
           }}
         >
-          {/* 左：Top 5 */}
-          <div>
+          {/* 左：Top 5（可滾動） */}
+          <div style={{ maxHeight: 320, overflowY: "auto", paddingRight: 6 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
                 <tr>
                   <th align="left" style={{ padding: "8px 4px", color: "#64748b" }}>
                     商品
@@ -451,8 +449,8 @@ export default function Reports() {
             </table>
           </div>
 
-          {/* 右：進貨建議 */}
-          <div>
+          {/* 右：進貨建議（可滾動） */}
+          <div style={{ maxHeight: 320, overflowY: "auto", paddingRight: 6 }}>
             {restock.map((r) => (
               <div
                 key={r.productId}
@@ -461,6 +459,7 @@ export default function Reports() {
                   borderRadius: 12,
                   padding: 12,
                   marginBottom: 12,
+                  background: "#fff",
                 }}
               >
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>
