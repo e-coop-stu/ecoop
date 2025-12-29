@@ -3,16 +3,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./lib/firebase";
 
-import Dashboard     from "./pages/Dashboard";
-import Transactions  from "./pages/Transactions";
-import Reports       from "./pages/Reports";
-import Inventory     from "./pages/Inventory";
-import POS           from "./pages/POS";
-import Login         from "./pages/Login";
-import Member        from "./pages/Member";
-import Notifications from "./pages/Notifications"; // 🔔 新增
+import Dashboard from "./pages/Dashboard";
+import Transactions from "./pages/Transactions";
+import Reports from "./pages/Reports";
+import Inventory from "./pages/Inventory";
+import POS from "./pages/POS";
+import Login from "./pages/Login";
+import Member from "./pages/Member";
+import Notifications from "./pages/Notifications";
 
-// Hash routes
+// Hash routes（支援 #/xxx?q=xxx）
 const routes = {
   "": Dashboard,
   "#/": Dashboard,
@@ -22,7 +22,7 @@ const routes = {
   "#/tx": Transactions,
   "#/inventory": Inventory,
   "#/member": Member,
-  "#/notifications": Notifications, // 🔔 新增
+  "#/notifications": Notifications,
   "#/login": Login,
 };
 
@@ -86,9 +86,21 @@ function SectionTitle({ children }) {
   );
 }
 
+// 解析 hash： "#/inventory?q=abc" -> { path:"#/inventory", q:"abc" }
+function parseHash(h) {
+  const raw = h || "#/";
+  const [path, qs] = raw.split("?");
+  const params = new URLSearchParams(qs || "");
+  return { path: path || "#/", q: params.get("q") || "" };
+}
+
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || "#/");
   const [user, setUser] = useState(undefined); // undefined=載入中, null=未登入, object=已登入
+
+  // ✅ 搜尋列狀態（商品/訂單 + 關鍵字）
+  const [searchType, setSearchType] = useState("inventory"); // inventory | tx
+  const [searchText, setSearchText] = useState("");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
@@ -100,8 +112,24 @@ export default function App() {
     };
   }, []);
 
-  const isLoginRoute = hash === "#/login";
-  const Page = useMemo(() => routes[hash] || Dashboard, [hash]);
+  // ✅ 讓 Page 選擇只看 path（不被 ?q= 影響）
+  const { path, q } = useMemo(() => parseHash(hash), [hash]);
+
+  // ✅ 當你跳到 inventory/tx 並帶 q 時，自動把搜尋框同步顯示
+  useEffect(() => {
+    if (path === "#/inventory") {
+      setSearchType("inventory");
+      if (q) setSearchText(q);
+    }
+    if (path === "#/tx") {
+      setSearchType("tx");
+      if (q) setSearchText(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, q]);
+
+  const isLoginRoute = path === "#/login";
+  const Page = useMemo(() => routes[path] || Dashboard, [path]);
 
   if (user === undefined) return null;
 
@@ -113,7 +141,7 @@ export default function App() {
   if (isLoginRoute) window.location.hash = "#/";
 
   const isActive = (h) =>
-    hash === h || (h === "#/" && (hash === "" || hash === "#/dashboard"));
+    path === h || (h === "#/" && (path === "" || path === "#/dashboard"));
 
   const initial = (user.displayName?.[0] || user.email?.[0] || "U").toUpperCase();
 
@@ -121,6 +149,21 @@ export default function App() {
     await signOut(auth);
     window.location.hash = "#/login";
   }
+
+  // ✅ 搜尋：按 Enter 或按鈕 → 跳到指定頁並帶 q
+  function runSearch() {
+    const keyword = String(searchText || "").trim();
+    if (!keyword) return;
+    window.location.hash = `#/${searchType}?q=${encodeURIComponent(keyword)}`;
+  }
+
+  // ✅ 右上四個按鈕（你要的四個）
+  const quickBtns = [
+    { to: "#/pos", label: "🧾 Checkout", primary: true },
+    { to: "#/inventory", label: "📦 Inventory", primary: false },
+    { to: "#/reports", label: "📈 Analytics", primary: false },
+    { to: "#/notifications", label: "🔔 Notifiction", primary: false },
+  ];
 
   return (
     <div
@@ -172,48 +215,13 @@ export default function App() {
         {/* Menu */}
         <SectionTitle>MENU</SectionTitle>
         <div style={{ display: "grid", gap: 6 }}>
-          <MenuItem
-            to="#/"
-            icon="🏠"
-            label="Dashboard"
-            active={isActive("#/") || isActive("#/dashboard")}
-          />
-          <MenuItem
-            to="#/pos"
-            icon="🧾"
-            label="POS"
-            active={isActive("#/pos")}
-          />
-          <MenuItem
-            to="#/reports"
-            icon="📈"
-            label="Analytics"
-            active={isActive("#/reports")}
-          />
-          <MenuItem
-            to="#/tx"
-            icon="📜"
-            label="Transactions"
-            active={isActive("#/tx")}
-          />
-          <MenuItem
-            to="#/member"
-            icon="💳"
-            label="Members / Deposit"
-            active={isActive("#/member")}
-          />
-          <MenuItem
-            to="#/inventory"
-            icon="📦"
-            label="Inventory"
-            active={isActive("#/inventory")}
-          />
-          <MenuItem
-            to="#/notifications"
-            icon="🔔"
-            label="Notifications"
-            active={isActive("#/notifications")}
-          />
+          <MenuItem to="#/" icon="🏠" label="Dashboard" active={isActive("#/") || isActive("#/dashboard")} />
+          <MenuItem to="#/pos" icon="🧾" label="POS" active={isActive("#/pos")} />
+          <MenuItem to="#/reports" icon="📈" label="Analytics" active={isActive("#/reports")} />
+          <MenuItem to="#/tx" icon="📜" label="Transactions" active={isActive("#/tx")} />
+          <MenuItem to="#/member" icon="💳" label="Members / Deposit" active={isActive("#/member")} />
+          <MenuItem to="#/inventory" icon="📦" label="Inventory" active={isActive("#/inventory")} />
+          <MenuItem to="#/notifications" icon="🔔" label="Notifications" active={isActive("#/notifications")} />
         </div>
 
         {/* General */}
@@ -258,23 +266,50 @@ export default function App() {
             alignItems: "center",
             gap: 12,
             marginBottom: 14,
+            flexWrap: "wrap",
           }}
         >
+          {/* ✅ 搜尋框（商品/訂單） */}
           <div
             style={{
               flex: 1,
+              minWidth: 320,
               background: "#fff",
               border: `1px solid ${theme.border}`,
               borderRadius: 12,
               padding: "10px 12px",
               display: "flex",
               alignItems: "center",
-              gap: 8,
+              gap: 10,
             }}
           >
             <span style={{ color: theme.subtext }}>🔎</span>
+
+            <select
+              value={searchType}
+              onChange={(e) => setSearchType(e.target.value)}
+              style={{
+                border: 0,
+                outline: 0,
+                background: "transparent",
+                color: theme.subtext,
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              <option value="inventory">商品</option>
+              <option value="tx">訂單/交易</option>
+            </select>
+
             <input
-              placeholder="Search task"
+              placeholder={
+                searchType === "inventory"
+                  ? "搜尋商品（name / sku / barcode）"
+                  : "搜尋訂單（pickupCode / orderId / uid / reqId）"
+              }
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runSearch()}
               style={{
                 border: 0,
                 outline: 0,
@@ -283,37 +318,44 @@ export default function App() {
                 background: "transparent",
               }}
             />
+
+            <button
+              onClick={runSearch}
+              style={{
+                border: `1px solid ${theme.border}`,
+                background: "#fff",
+                borderRadius: 10,
+                padding: "8px 12px",
+                fontWeight: 900,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              搜尋
+            </button>
           </div>
 
-          <a
-            href="#/pos"
-            style={{
-              background: theme.primary,
-              color: "#fff",
-              textDecoration: "none",
-              padding: "10px 14px",
-              borderRadius: 12,
-              fontWeight: 700,
-            }}
-          >
-            + Add Project
-          </a>
+          {/* ✅ 四個快捷按鈕 */}
+          {quickBtns.map((b) => (
+            <a
+              key={b.to}
+              href={b.to}
+              style={{
+                background: b.primary ? theme.primary : "#fff",
+                color: b.primary ? "#fff" : theme.text,
+                textDecoration: "none",
+                padding: "10px 14px",
+                borderRadius: 12,
+                fontWeight: 800,
+                border: b.primary ? "none" : `1px solid ${theme.border}`,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {b.label}
+            </a>
+          ))}
 
-          <a
-            href="#/inventory"
-            style={{
-              background: "#fff",
-              color: theme.text,
-              textDecoration: "none",
-              padding: "10px 14px",
-              borderRadius: 12,
-              border: `1px solid ${theme.border}`,
-              fontWeight: 700,
-            }}
-          >
-            Import Data
-          </a>
-
+          {/* Avatar */}
           <div
             title={user.email}
             onClick={doSignOut}

@@ -1,3 +1,4 @@
+// src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import Topbar from "../components/Topbar";
 import Card from "../components/Card";
@@ -39,6 +40,23 @@ function toTs(dateStr) {
   return Timestamp.fromDate(new Date(dateStr + "T00:00:00"));
 }
 
+/** ✅ 讀取 hash query：#/inventory?q=xxx */
+function getHashQueryParam(key) {
+  const hash = window.location.hash || "";
+  const idx = hash.indexOf("?");
+  if (idx < 0) return "";
+  const qs = hash.slice(idx + 1);
+  const sp = new URLSearchParams(qs);
+  return (sp.get(key) || "").trim();
+}
+
+/** ✅ 清除 hash query（保留路徑，不帶 ?q=） */
+function clearHashQuery() {
+  const hash = window.location.hash || "#/inventory";
+  const path = hash.split("?")[0] || "#/inventory";
+  window.location.hash = path;
+}
+
 export default function Inventory() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -51,12 +69,40 @@ export default function Inventory() {
   const [products, setProducts] = useState([]); // [{id, name, sku, barcode, price, stock, expiryAlertDays}]
   const [productId, setProductId] = useState("");
 
+  // ✅ 由網址帶入的搜尋字
+  const [q, setQ] = useState(() => getHashQueryParam("q"));
+
+  // 監聽 hashchange：讓 App 上方搜尋一跳過來就能更新
+  useEffect(() => {
+    const onHash = () => setQ(getHashQueryParam("q"));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const filteredProducts = useMemo(() => {
+    const kw = String(q || "").trim().toLowerCase();
+    if (!kw) return products;
+
+    return products.filter((p) => {
+      const name = String(p.name || "").toLowerCase();
+      const sku = String(p.sku || "").toLowerCase();
+      const barcode = String(p.barcode || "").toLowerCase();
+      const id = String(p.id || "").toLowerCase();
+      return (
+        name.includes(kw) ||
+        sku.includes(kw) ||
+        barcode.includes(kw) ||
+        id.includes(kw)
+      );
+    });
+  }, [products, q]);
+
   const currentProduct = useMemo(
     () => products.find((p) => p.id === productId) || null,
     [products, productId]
   );
 
-  // ✅ 商品編輯表單（把你原本商品編輯加回來）
+  // ✅ 商品編輯表單
   const [pForm, setPForm] = useState({
     name: "",
     sku: "",
@@ -87,6 +133,28 @@ export default function Inventory() {
     }));
     setProducts(list);
 
+    // ✅ 若網址有 q，優先選第一個符合的商品
+    const kw = String(getHashQueryParam("q") || "").trim().toLowerCase();
+    if (kw) {
+      const hit = list.find((p) => {
+        const name = String(p.name || "").toLowerCase();
+        const sku = String(p.sku || "").toLowerCase();
+        const barcode = String(p.barcode || "").toLowerCase();
+        const id = String(p.id || "").toLowerCase();
+        return (
+          name.includes(kw) ||
+          sku.includes(kw) ||
+          barcode.includes(kw) ||
+          id.includes(kw)
+        );
+      });
+      if (hit) {
+        setProductId(hit.id);
+        return;
+      }
+    }
+
+    // 否則維持原本：沒選就選第一個
     if (!productId && list.length > 0) {
       setProductId(list[0].id);
     }
@@ -230,10 +298,10 @@ export default function Inventory() {
         for (const b of bSnap.docs) {
           const batchId = b.id;
           const data = b.data();
-          const q = Number(data.qty || 0);
+          const qx = Number(data.qty || 0);
           const exp = data.expiryAt?.toDate ? data.expiryAt.toDate() : null;
 
-          if (!exp || q <= 0) {
+          if (!exp || qx <= 0) {
             skipped++;
             continue;
           }
@@ -265,7 +333,7 @@ export default function Inventory() {
                   productId: pid,
                   productName: pname,
                   batchId,
-                  qty: q,
+                  qty: qx,
                   expiryAt: data.expiryAt,
                   leftDays: info.left,
                   updatedAt: serverTimestamp(),
@@ -284,7 +352,7 @@ export default function Inventory() {
               productId: pid,
               productName: pname,
               batchId,
-              qty: q,
+              qty: qx,
               expiryAt: data.expiryAt,
               leftDays: info.left,
               createdAt: serverTimestamp(),
@@ -318,6 +386,17 @@ export default function Inventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
+  // ✅ 若 q 改變且目前 productId 不在篩選結果內，就自動切到第一個符合
+  useEffect(() => {
+    if (!q) return;
+    if (!filteredProducts || filteredProducts.length === 0) return;
+    const stillValid = filteredProducts.some((p) => p.id === productId);
+    if (!stillValid) {
+      setProductId(filteredProducts[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, filteredProducts.length]);
+
   // 統計
   const stats = useMemo(() => {
     let totalQty = 0;
@@ -326,19 +405,38 @@ export default function Inventory() {
 
     for (const b of batches) {
       const exp = b.expiryAt?.toDate ? b.expiryAt.toDate() : null;
-      const q = Number(b.qty || 0);
-      totalQty += q;
+      const qx = Number(b.qty || 0);
+      totalQty += qx;
       if (!exp) continue;
       const { level } = getLevel(exp, Number(alertDays || 7));
-      if (level === "near") nearQty += q;
-      if (level === "expired") expiredQty += q;
+      if (level === "near") nearQty += qx;
+      if (level === "expired") expiredQty += qx;
     }
     return { totalQty, nearQty, expiredQty };
   }, [batches, alertDays]);
 
+  const kw = String(q || "").trim();
+
   return (
     <>
       <Topbar title="庫存 / 批次管理" />
+
+      {/* ✅ 顯示目前搜尋條件 */}
+      {kw && (
+        <Card title="目前搜尋" className="span-12 card" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ color: "#334155" }}>
+              關鍵字：<b>{kw}</b>（符合商品：<b>{filteredProducts.length}</b>）
+            </div>
+            <button onClick={clearHashQuery}>清除搜尋</button>
+          </div>
+          {filteredProducts.length === 0 && (
+            <div style={{ marginTop: 8, fontSize: 13, color: "#b00020" }}>
+              找不到符合的商品（會顯示完整清單前，請先清除搜尋或換關鍵字）
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* 🔔 到期通知掃描（B） */}
       <Card
@@ -375,7 +473,7 @@ export default function Inventory() {
               onChange={(e) => setProductId(e.target.value)}
               style={{ marginLeft: 8, minWidth: 240 }}
             >
-              {products.map((p) => (
+              {(kw ? filteredProducts : products).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name || p.id}
                 </option>
@@ -395,7 +493,7 @@ export default function Inventory() {
         </div>
       </Card>
 
-      {/* ✅ 商品資料編輯（加回來） */}
+      {/* ✅ 商品資料編輯 */}
       <Card title="商品資料編輯" className="span-12 card" style={{ marginBottom: 12 }}>
         <div
           style={{

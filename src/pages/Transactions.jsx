@@ -14,11 +14,15 @@ import {
 } from "firebase/firestore";
 
 // ===== 日期工具 =====
-const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+const startOfDay = (d) =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+const endOfDay = (d) =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
 
 const toLocalISODate = (d = new Date()) =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
 
 function toDateMaybeTs(v) {
   if (v?.toDate) return v.toDate();
@@ -42,16 +46,44 @@ function money(n) {
   return `$${Number(n || 0).toLocaleString()}`;
 }
 
+/** 讀 hash query： "#/tx?q=xxx" -> "xxx" */
+function readQFromHash() {
+  const h = window.location.hash || "#/tx";
+  const idx = h.indexOf("?");
+  if (idx < 0) return "";
+  const qs = h.slice(idx + 1);
+  const p = new URLSearchParams(qs);
+  return (p.get("q") || "").trim();
+}
+
+/** 清掉 #/tx?q=... */
+function clearQInHash() {
+  // 只留下 "#/tx"
+  window.location.hash = "#/tx";
+}
+
+const s = (v) => (v == null ? "" : String(v).toLowerCase());
+
 export default function Transactions() {
   // ✅ 預設 7 天
-  const [from, setFrom] = useState(toLocalISODate(new Date(Date.now() - 6 * 86400000)));
+  const [from, setFrom] = useState(
+    toLocalISODate(new Date(Date.now() - 6 * 86400000))
+  );
   const [to, setTo] = useState(toLocalISODate(new Date()));
   const [methodFilter, setMethodFilter] = useState("全部");
   const [busy, setBusy] = useState(false);
 
   const [rows, setRows] = useState([]); // 合併後的交易資料
+  const [q, setQ] = useState(readQFromHash()); // ✅ 來自 #/tx?q=
 
-  // ===== 讀 transactions（你原本的）=====
+  // ✅ 監聽 hash 變更（App 搜尋會改 hash）
+  useEffect(() => {
+    const onHash = () => setQ(readQFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // ===== 讀 transactions =====
   async function fetchTransactions(fromTs, toTs) {
     const q1 = query(
       collection(db, "transactions"),
@@ -64,9 +96,8 @@ export default function Transactions() {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   }
 
-  // ===== 讀 checkout_requests verified（樹莓派完成的）=====
+  // ===== 讀 checkout_requests verified =====
   async function fetchCheckoutRequestsVerified(fromTs, toTs) {
-    // createdAt 要能做 range + orderBy，需要 composite index（status + createdAt）
     const q1 = query(
       collection(db, "checkout_requests"),
       where("status", "==", "verified"),
@@ -124,7 +155,7 @@ export default function Transactions() {
         ...txs.map(normalizeTransaction),
         ...reqs.map(normalizeCheckoutRequest),
       ]
-        .filter((r) => r.ts) // 沒時間的不要
+        .filter((r) => r.ts)
         .sort((a, b) => b.ts - a.ts);
 
       setRows(merged);
@@ -141,11 +172,55 @@ export default function Transactions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== 篩選後顯示 =====
+  /** ✅ q 搜尋：比對 id / pickupCode / orderId / who / method / source / items */
+  const matchesQ = (r, keyword) => {
+    const k = s(keyword);
+    if (!k) return true;
+
+    const raw = r.raw || {};
+    const items = Array.isArray(raw.items) ? raw.items : [];
+
+    const hay = [
+      r.id,
+      r.source,
+      r.method,
+      r.total,
+      raw.pickupCode,
+      raw.orderId,
+      raw.who,
+      raw.studentId,
+      raw.userId,
+      raw.status,
+      ...items.flatMap((it) => [
+        it.name,
+        it.sku,
+        it.productId,
+        it.productID,
+        it.pid,
+        it.barcode,
+      ]),
+    ]
+      .map(s)
+      .filter(Boolean)
+      .join(" | ");
+
+    return hay.includes(k);
+  };
+
+  // ===== 篩選後顯示（method + q）=====
   const filtered = useMemo(() => {
-    if (methodFilter === "全部") return rows;
-    return rows.filter((r) => (r.method || "其他") === methodFilter);
-  }, [rows, methodFilter]);
+    let out = rows;
+
+    if (methodFilter !== "全部") {
+      out = out.filter((r) => (r.method || "其他") === methodFilter);
+    }
+
+    if (q) {
+      out = out.filter((r) => matchesQ(r, q));
+    }
+
+    return out;
+  }, [rows, methodFilter, q]);
 
   const methodOptions = useMemo(() => {
     const set = new Set(rows.map((r) => r.method || "其他"));
@@ -160,17 +235,23 @@ export default function Transactions() {
   // ===== 匯出 CSV =====
   const exportCSV = () => {
     const lines = [
-      "時間,付款方式,金額,ID,來源",
+      "時間,付款方式,金額,取貨碼,ID,來源,who,orderId",
       ...filtered.map((r) => {
         const t = r.ts ? fmtDateTime(r.ts) : "";
-        return `${t},${r.method},${r.total},${r.id},${r.source}`;
+        const raw = r.raw || {};
+        const pickup = raw.pickupCode || "";
+        return `${t},${r.method},${r.total},${pickup},${r.id},${r.source},${
+          raw.who || ""
+        },${raw.orderId || ""}`;
       }),
     ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `transactions_${from}_to_${to}.csv`;
+    a.download = `transactions_${from}_to_${to}${q ? `_q-${q}` : ""}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -180,20 +261,38 @@ export default function Transactions() {
       <Topbar title="交易紀錄" />
 
       <Card title="篩選" className="span-12" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "end",
+            flexWrap: "wrap",
+          }}
+        >
           <label>
             自：
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
           </label>
 
           <label>
             至：
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
           </label>
 
           <label>
             付款方式：
-            <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)}>
+            <select
+              value={methodFilter}
+              onChange={(e) => setMethodFilter(e.target.value)}
+            >
               {methodOptions.map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -202,9 +301,36 @@ export default function Transactions() {
             </select>
           </label>
 
+          {/* ✅ 顯示搜尋字（來自 #/tx?q=） */}
+          <div style={{ fontSize: 13, color: "#64748b" }}>
+            搜尋：<b>{q || "-"}</b>
+          </div>
+
           <button onClick={load} disabled={busy}>
             {busy ? "查詢中…" : "查詢"}
           </button>
+
+          {/* ✅ 這裡要看 q，不是 search */}
+          {q && (
+            <button
+              onClick={() => {
+                clearQInHash(); // 會觸發 hashchange → setQ("")
+                // 你也可以選擇不 load()，因為 rows 本來就全資料，q 清掉就會自動回全表
+                // 但如果你想要「順便重抓最新資料」，就保留：
+                load();
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 13,
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+                borderRadius: 8,
+                color: "#64748b",
+              }}
+            >
+              ✕ 清除搜尋
+            </button>
+          )}
 
           <button onClick={exportCSV} disabled={busy || filtered.length === 0}>
             匯出 CSV
@@ -217,6 +343,7 @@ export default function Transactions() {
 
         <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
           已合併：transactions + checkout_requests(verified)
+          {q ? "｜已套用搜尋條件" : ""}
         </div>
       </Card>
 
@@ -225,42 +352,95 @@ export default function Transactions() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th align="left" style={{ padding: "10px 8px", color: "#64748b" }}>
+                <th
+                  align="left"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
                   時間
                 </th>
-                <th align="left" style={{ padding: "10px 8px", color: "#64748b" }}>
+                <th
+                  align="left"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
                   付款方式
                 </th>
-                <th align="right" style={{ padding: "10px 8px", color: "#64748b" }}>
+                <th
+                  align="right"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
                   金額
                 </th>
-                <th align="left" style={{ padding: "10px 8px", color: "#64748b" }}>
+                <th
+                  align="left"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
+                  取貨碼
+                </th>
+                <th
+                  align="left"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
                   ID
                 </th>
-                <th align="left" style={{ padding: "10px 8px", color: "#64748b" }}>
+                <th
+                  align="left"
+                  style={{ padding: "10px 8px", color: "#64748b" }}
+                >
                   來源
                 </th>
               </tr>
             </thead>
+
             <tbody>
               {filtered.map((r) => (
                 <tr key={`${r.source}-${r.id}`}>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>
+                  <td
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
                     {r.ts ? fmtDateTime(r.ts) : "-"}
                   </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>
+                  <td
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
                     {r.method}
                   </td>
                   <td
                     align="right"
-                    style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
                   >
                     {money(r.total)}
                   </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>
+                  <td
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
+                    {r.raw?.pickupCode || "-"}
+                  </td>
+                  <td
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
                     {r.id}
                   </td>
-                  <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>
+                  <td
+                    style={{
+                      padding: "10px 8px",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
                     {r.source}
                   </td>
                 </tr>
@@ -268,8 +448,9 @@ export default function Transactions() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: 12, color: "#64748b" }}>
-                    此期間沒有資料（或被篩選條件排除）
+                  {/* ✅ 你現在有 6 欄，所以 colSpan 要 6 */}
+                  <td colSpan={6} style={{ padding: 12, color: "#64748b" }}>
+                    此期間沒有資料（或被篩選 / 搜尋條件排除）
                   </td>
                 </tr>
               )}
