@@ -508,7 +508,7 @@ export default function POS() {
               style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0" }}
             >
               <option value="Face Pay">Face Pay（人臉）</option>
-              <option value="RFID/卡片">RFID / 卡片</option>
+              <option value="RFID">RFID / 卡片</option>
             </select>
 
             {watching && (
